@@ -51,7 +51,7 @@ app.get("/liquidaciones", async (req, res) => {
         const processedLiquidations = [];
         for (let t = from * 1000; t <= to * 1000; t += 60000) {
             const date = new Date(t);
-            const entry = liquidationMap.get(t) || { long: 0.01, short: 0.01 };
+            const entry = liquidationMap.get(t) || { long: 0.0001, short: 0.0001 }; // Valor por defecto si no hay datos
 
             processedLiquidations.push({
                 timestamp: t,
@@ -73,26 +73,26 @@ app.get("/liquidaciones", async (req, res) => {
         res.setHeader("Expires", "0");
         res.setHeader("Surrogate-Control", "no-store");
 
-        // CSV
+        // JSON - Descargar archivo
         if (req.query.download !== undefined) {
-            const csvHeaders = "fecha/hora (local),long,short";
-            const csvRows = processedLiquidations.map(l =>
-                `"${l.timeShort}",${l.long},${l.short}`
-            );
-            const csvContent = [csvHeaders, ...csvRows].join("\n");
+            const jsonContent = processedLiquidations.map(l => ({
+                timestamp: l.timestamp,
+                long: l.long,
+                short: l.short
+            }));
 
-            res.setHeader("Content-Type", "text/csv");
-            res.setHeader("Content-Disposition", "attachment; filename=liquidaciones.csv");
-            return res.send(csvContent);
+            res.setHeader("Content-Type", "application/json");
+            res.setHeader("Content-Disposition", "attachment; filename=liquidaciones.json");
+            return res.json(jsonContent);
         }
 
-        // HTML
+        // HTML - Mostrar tabla
         res.setHeader("Content-Type", "text/html; charset=utf-8");
 
         const tableHeaders = ["fecha/hora (local)", "long", "short"];
         let html = `<h2>Liquidaciones BTC - Últimas 24h</h2>
                     <p>Actualizado: ${updatedTime}</p>
-                    <p><a href="/liquidaciones?download">Descargar CSV</a></p>`;
+                    <p><a href="/liquidaciones?download">Descargar JSON</a></p>`;
 
         if (processedLiquidations.length === 0) {
             html += `<p>No se encontraron datos.</p>`;
