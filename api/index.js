@@ -12,15 +12,15 @@ app.get("/liquidaciones", async (req, res) => {
         const now = new Date();
         now.setSeconds(0);
         now.setMilliseconds(0);
-        now.setMinutes(now.getMinutes() - 1); // 1 minuto antes del actual
+        now.setMinutes(now.getMinutes() - 5); // 5 minutos antes del actual
 
         const to = Math.floor(now.getTime() / 1000); // Timestamp del minuto anterior
-        const from = to - 30000; // 500 minutos atrás
+        const from = to - 2500000; // 2500 minutos atrás (2500 * 60 segundos)
 
         console.log("From:", new Date(from * 1000).toString());
         console.log("To:  ", new Date(to * 1000).toString());
 
-        const url = `https://api.coinalyze.net/v1/liquidation-history?api_key=84bd6d2d-4045-4b53-8b61-151c618d4311&symbols=BTCUSDT_PERP.A&interval=1min&from=${from}&to=${to}&convert_to_usd=true`;
+        const url = `https://api.coinalyze.net/v1/liquidation-history?api_key=84bd6d2d-4045-4b53-8b61-151c618d4311&symbols=BTCUSDT_PERP.A&interval=5min&from=${from}&to=${to}&convert_to_usd=true`;
 
         const response = await fetch(url);
         const rawBody = await response.text();
@@ -47,9 +47,9 @@ app.get("/liquidaciones", async (req, res) => {
             });
         }
 
-        // Procesar todos los minutos entre from y to
+        // Procesar todos los minutos entre from y to, ahora con intervalos de 5 minutos
         const processedLiquidations = [];
-        for (let t = from * 1000; t <= to * 1000; t += 60000) {
+        for (let t = from * 1000; t <= to * 1000; t += 300000) { // 5 minutos
             const date = new Date(t);
             const entry = liquidationMap.get(t) || { long: 0.0001, short: 0.0001 }; // Valor por defecto si no hay datos
 
