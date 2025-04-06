@@ -1,654 +1,238 @@
-const express = require("express");
-const fetch = require("node-fetch");
-const cors = require("cors");
+class BinanceAPI {
+    constructor() {
+        this.socket = null;
+        this.candleData = {
+            time: [],
+            open: [],
+            high: [],
+            low: [],
+            close: [],
+            volume: []
+        };
+        this.liquidationData = {
+            time: [],
+            long: [],
+            short: []
+        };
+        this.currentTimeframe = '5m';
+        this.priceCurrent = 0;
+        this.onUpdateCallback = null;
+        this.isLoadingLiquidations = false;
 
-const app = express();
-app.use(cors({ origin: "*" }));
-
-// Liquidaciones 5min
-app.get("/liquidaciones5min", async (req, res) => {
-    try {
-        console.log(`Llamo a Coinalyze (5min): ${new Date().toISOString()}`);
-
-        const now = new Date();
-
-        const minutes = now.getMinutes();
-        const roundedMinutes = Math.floor(minutes / 5) * 5;
-        now.setMinutes(roundedMinutes);
-        now.setSeconds(0);
-        now.setMilliseconds(0);
-        now.setMinutes(now.getMinutes() - 5);
-
-        const to = Math.floor(now.getTime() / 1000);
-        const from = to - (500 * 5 * 60);
-
-        const url = `https://api.coinalyze.net/v1/liquidation-history?api_key=84bd6d2d-4045-4b53-8b61-151c618d4311&symbols=BTCUSDT_PERP.A&interval=5min&from=${from}&to=${to}&convert_to_usd=true`;
-
-        const response = await fetch(url);
-        const rawBody = await response.text();
-
-        if (!response.ok) {
-            console.error("Error Coinalyze:", response.status, rawBody);
-            return res.status(500).send(`<h3>Error al obtener datos de Coinalyze</h3><pre>${rawBody}</pre>`);
-        }
-
-        const data = JSON.parse(rawBody);
-        const liquidationMap = new Map();
-
-        if (Array.isArray(data)) {
-            data.forEach(item => {
-                if (Array.isArray(item.history)) {
-                    item.history.forEach(entry => {
-                        const timestamp = entry.t * 1000;
-                        liquidationMap.set(timestamp, {
-                            long: entry.l,
-                            short: entry.s
-                        });
-                    });
-                }
-            });
-        }
-
-        const processedLiquidations = [];
-        for (let t = from * 1000; t <= to * 1000; t += 5 * 60 * 1000) {
-            const date = new Date(t);
-            const entry = liquidationMap.get(t) || { long: 0, short: 0 };
-            processedLiquidations.push({
-                timestamp: t,
-                time: date.toISOString(),
-                timeShort: date.toLocaleString('es-ES', {
-                    dateStyle: 'short',
-                    timeStyle: 'medium'
-                }),
-                long: entry.long,
-                short: entry.short
-            });
-        }
-
-        const updatedTime = processedLiquidations.length > 0 ? processedLiquidations.at(-1).time : "Sin datos";
-
-        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-        res.setHeader("Pragma", "no-cache");
-        res.setHeader("Expires", "0");
-        res.setHeader("Surrogate-Control", "no-store");
-
-        if (req.query.download !== undefined) {
-            const jsonContent = processedLiquidations.map(l => ({
-                timestamp: l.timestamp,
-                long: l.long,
-                short: l.short
-            }));
-
-            res.setHeader("Content-Type", "application/json");
-            res.setHeader("Content-Disposition", "attachment; filename=liquidaciones5min.json");
-            return res.json(jsonContent);
-        }
-
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-
-        const tableHeaders = ["fecha/hora (local)", "long", "short"];
-        let html = `<h2>Liquidaciones BTC - Últimos 500 bloques de 5min</h2>
-                    <p>Actualizado: ${updatedTime}</p>
-                    <p><a href="/liquidaciones5min?download">Descargar JSON</a></p>`;
-
-        if (processedLiquidations.length === 0) {
-            html += `<p>No se encontraron datos.</p>`;
-        } else {
-            html += `<table border="1" style="border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px;">
-                        <thead style="background-color: #f2f2f2;">
-                           <tr>${tableHeaders.map(h => `<th>${h}</th>`).join('')}</tr>
-                        </thead>
-                        <tbody>`;
-            processedLiquidations.forEach(l => {
-                html += `<tr><td>${l.timeShort}</td><td>${l.long}</td><td>${l.short}</td></tr>`;
-            });
-            html += `</tbody></table>`;
-        }
-
-        return res.status(200).send(html);
-
-    } catch (err) {
-        console.error("ERROR:", err);
-        return res.status(500).send(`<h3>Error inesperado</h3><pre>${err.message}</pre>`);
+        // Inicializar datos automáticamente al crear la instancia
+        this.initializeData();
     }
-});
 
-// Liquidaciones 1min
-app.get("/liquidaciones1min", async (req, res) => {
-    try {
-        console.log(`Llamo a Coinalyze (1min): ${new Date().toISOString()}`);
-
-        const now = new Date();
-        now.setSeconds(0);
-        now.setMilliseconds(0);
-        now.setMinutes(now.getMinutes() - 1);
-
-        const to = Math.floor(now.getTime() / 1000);
-        const from = to - (500 * 60);
-
-        const url = `https://api.coinalyze.net/v1/liquidation-history?api_key=84bd6d2d-4045-4b53-8b61-151c618d4311&symbols=BTCUSDT_PERP.A&interval=1min&from=${from}&to=${to}&convert_to_usd=true`;
-
-        const response = await fetch(url);
-        const rawBody = await response.text();
-
-        if (!response.ok) {
-            console.error("Error Coinalyze:", response.status, rawBody);
-            return res.status(500).send(`<h3>Error al obtener datos de Coinalyze</h3><pre>${rawBody}</pre>`);
-        }
-
-        const data = JSON.parse(rawBody);
-        const liquidationMap = new Map();
-
-        if (Array.isArray(data)) {
-            data.forEach(item => {
-                if (Array.isArray(item.history)) {
-                    item.history.forEach(entry => {
-                        const timestamp = entry.t * 1000;
-                        liquidationMap.set(timestamp, {
-                            long: entry.l,
-                            short: entry.s
-                        });
-                    });
-                }
-            });
-        }
-
-        const processedLiquidations = [];
-        for (let t = from * 1000; t <= to * 1000; t += 60 * 1000) {
-            const date = new Date(t);
-            const entry = liquidationMap.get(t) || { long: 0, short: 0 };
-            processedLiquidations.push({
-                timestamp: t,
-                time: date.toISOString(),
-                timeShort: date.toLocaleString('es-ES', {
-                    dateStyle: 'short',
-                    timeStyle: 'medium'
-                }),
-                long: entry.long,
-                short: entry.short
-            });
-        }
-
-        const updatedTime = processedLiquidations.length > 0 ? processedLiquidations.at(-1).time : "Sin datos";
-
-        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-        res.setHeader("Pragma", "no-cache");
-        res.setHeader("Expires", "0");
-        res.setHeader("Surrogate-Control", "no-store");
-
-        if (req.query.download !== undefined) {
-            const jsonContent = processedLiquidations.map(l => ({
-                timestamp: l.timestamp,
-                long: l.long,
-                short: l.short
-            }));
-
-            res.setHeader("Content-Type", "application/json");
-            res.setHeader("Content-Disposition", "attachment; filename=liquidaciones1min.json");
-            return res.json(jsonContent);
-        }
-
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-
-        const tableHeaders = ["fecha/hora (local)", "long", "short"];
-        let html = `<h2>Liquidaciones BTC - Últimos 500 bloques de 1min</h2>
-                    <p>Actualizado: ${updatedTime}</p>
-                    <p><a href="/liquidaciones1min?download">Descargar JSON</a></p>`;
-
-        if (processedLiquidations.length === 0) {
-            html += `<p>No se encontraron datos.</p>`;
-        } else {
-            html += `<table border="1" style="border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px;">
-                        <thead style="background-color: #f2f2f2;">
-                           <tr>${tableHeaders.map(h => `<th>${h}</th>`).join('')}</tr>
-                        </thead>
-                        <tbody>`;
-            processedLiquidations.forEach(l => {
-                html += `<tr><td>${l.timeShort}</td><td>${l.long}</td><td>${l.short}</td></tr>`;
-            });
-            html += `</tbody></table>`;
-        }
-
-        return res.status(200).send(html);
-
-    } catch (err) {
-        console.error("ERROR:", err);
-        return res.status(500).send(`<h3>Error inesperado</h3><pre>${err.message}</pre>`);
+    async initializeData() {
+        await this.loadLiquidationData();
+        this.startLiveUpdates();
     }
-});
 
-
-// Liquidaciones 15min
-app.get("/liquidaciones15min", async (req, res) => {
-    try {
-        console.log(`Llamo a Coinalyze (15min): ${new Date().toISOString()}`);
-
-        const now = new Date();
-
-        const minutes = now.getMinutes();
-        const roundedMinutes = Math.floor(minutes / 15) * 15;
-        now.setMinutes(roundedMinutes);
-        now.setSeconds(0);
-        now.setMilliseconds(0);
-        now.setMinutes(now.getMinutes() - 15);
-
-        const to = Math.floor(now.getTime() / 1000);
-        const from = to - (500 * 15 * 60);
-
-        const url = `https://api.coinalyze.net/v1/liquidation-history?api_key=84bd6d2d-4045-4b53-8b61-151c618d4311&symbols=BTCUSDT_PERP.A&interval=15min&from=${from}&to=${to}&convert_to_usd=true`;
-
-        const response = await fetch(url);
-        const rawBody = await response.text();
-
-        if (!response.ok) {
-            console.error("Error Coinalyze:", response.status, rawBody);
-            return res.status(500).send(`<h3>Error al obtener datos de Coinalyze</h3><pre>${rawBody}</pre>`);
-        }
-
-        const data = JSON.parse(rawBody);
-        const liquidationMap = new Map();
-
-        if (Array.isArray(data)) {
-            data.forEach(item => {
-                if (Array.isArray(item.history)) {
-                    item.history.forEach(entry => {
-                        const timestamp = entry.t * 1000;
-                        liquidationMap.set(timestamp, {
-                            long: entry.l,
-                            short: entry.s
-                        });
-                    });
-                }
-            });
-        }
-
-        const processedLiquidations = [];
-        for (let t = from * 1000; t <= to * 1000; t += 15 * 60 * 1000) {
-            const date = new Date(t);
-            const entry = liquidationMap.get(t) || { long: 0, short: 0 };
-            processedLiquidations.push({
-                timestamp: t,
-                time: date.toISOString(),
-                timeShort: date.toLocaleString('es-ES', {
-                    dateStyle: 'short',
-                    timeStyle: 'medium'
-                }),
-                long: entry.long,
-                short: entry.short
-            });
-        }
-
-        const updatedTime = processedLiquidations.length > 0 ? processedLiquidations.at(-1).time : "Sin datos";
-
-        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-        res.setHeader("Pragma", "no-cache");
-        res.setHeader("Expires", "0");
-        res.setHeader("Surrogate-Control", "no-store");
-
-        if (req.query.download !== undefined) {
-            const jsonContent = processedLiquidations.map(l => ({
-                timestamp: l.timestamp,
-                long: l.long,
-                short: l.short
-            }));
-
-            res.setHeader("Content-Type", "application/json");
-            res.setHeader("Content-Disposition", "attachment; filename=liquidaciones15min.json");
-            return res.json(jsonContent);
-        }
-
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-
-        const tableHeaders = ["fecha/hora (local)", "long", "short"];
-        let html = `<h2>Liquidaciones BTC - Últimos 500 bloques de 15min</h2>
-                    <p>Actualizado: ${updatedTime}</p>
-                    <p><a href="/liquidaciones15min?download">Descargar JSON</a></p>`;
-
-        if (processedLiquidations.length === 0) {
-            html += `<p>No se encontraron datos.</p>`;
-        } else {
-            html += `<table border="1" style="border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px;">
-                        <thead style="background-color: #f2f2f2;">
-                           <tr>${tableHeaders.map(h => `<th>${h}</th>`).join('')}</tr>
-                        </thead>
-                        <tbody>`;
-            processedLiquidations.forEach(l => {
-                html += `<tr><td>${l.timeShort}</td><td>${l.long}</td><td>${l.short}</td></tr>`;
-            });
-            html += `</tbody></table>`;
-        }
-
-        return res.status(200).send(html);
-
-    } catch (err) {
-        console.error("ERROR:", err);
-        return res.status(500).send(`<h3>Error inesperado</h3><pre>${err.message}</pre>`);
+    setUpdateCallback(callback) {
+        this.onUpdateCallback = callback;
     }
-});
 
-
-// Liquidaciones 1h
-app.get("/liquidaciones1hour", async (req, res) => {
-    try {
-        console.log(`Llamo a Coinalyze (1h): ${new Date().toISOString()}`);
-
-        const now = new Date();
-
-        const roundedHours = now.getHours();
-        now.setMinutes(0);
-        now.setSeconds(0);
-        now.setMilliseconds(0);
-        now.setHours(roundedHours - 1); // Resta 1 hora completa
-
-        const to = Math.floor(now.getTime() / 1000); // timestamp final
-        const from = to - (500 * 60 * 60); // 500 bloques de 1 hora
-
-        const url = `https://api.coinalyze.net/v1/liquidation-history?api_key=84bd6d2d-4045-4b53-8b61-151c618d4311&symbols=BTCUSDT_PERP.A&interval=1hour&from=${from}&to=${to}&convert_to_usd=true`;
-
-        const response = await fetch(url);
-        const rawBody = await response.text();
-
-        if (!response.ok) {
-            console.error("Error Coinalyze:", response.status, rawBody);
-            return res.status(500).send(`<h3>Error al obtener datos de Coinalyze</h3><pre>${rawBody}</pre>`);
-        }
-
-        const data = JSON.parse(rawBody);
-        const liquidationMap = new Map();
-
-        if (Array.isArray(data)) {
-            data.forEach(item => {
-                if (Array.isArray(item.history)) {
-                    item.history.forEach(entry => {
-                        const timestamp = entry.t * 1000;
-                        liquidationMap.set(timestamp, {
-                            long: entry.l,
-                            short: entry.s
-                        });
-                    });
-                }
-            });
-        }
-
-        const processedLiquidations = [];
-        for (let t = from * 1000; t <= to * 1000; t += 60 * 60 * 1000) {
-            const date = new Date(t);
-            const entry = liquidationMap.get(t) || { long: 0, short: 0 };
-            processedLiquidations.push({
-                timestamp: t,
-                time: date.toISOString(),
-                timeShort: date.toLocaleString('es-ES', {
-                    dateStyle: 'short',
-                    timeStyle: 'medium'
-                }),
-                long: entry.long,
-                short: entry.short
-            });
-        }
-
-        const updatedTime = processedLiquidations.length > 0 ? processedLiquidations.at(-1).time : "Sin datos";
-
-        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-        res.setHeader("Pragma", "no-cache");
-        res.setHeader("Expires", "0");
-        res.setHeader("Surrogate-Control", "no-store");
-
-        if (req.query.download !== undefined) {
-            const jsonContent = processedLiquidations.map(l => ({
-                timestamp: l.timestamp,
-                long: l.long,
-                short: l.short
-            }));
-
-            res.setHeader("Content-Type", "application/json");
-            res.setHeader("Content-Disposition", "attachment; filename=liquidaciones1hour.json");
-            return res.json(jsonContent);
-        }
-
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-
-        const tableHeaders = ["fecha/hora (local)", "long", "short"];
-        let html = `<h2>Liquidaciones BTC - Últimos 500 bloques de 1h</h2>
-                    <p>Actualizado: ${updatedTime}</p>
-                    <p><a href="/liquidaciones1hour?download">Descargar JSON</a></p>`;
-
-        if (processedLiquidations.length === 0) {
-            html += `<p>No se encontraron datos.</p>`;
-        } else {
-            html += `<table border="1" style="border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px;">
-                        <thead style="background-color: #f2f2f2;">
-                           <tr>${tableHeaders.map(h => `<th>${h}</th>`).join('')}</tr>
-                        </thead>
-                        <tbody>`;
-            processedLiquidations.forEach(l => {
-                html += `<tr><td>${l.timeShort}</td><td>${l.long}</td><td>${l.short}</td></tr>`;
-            });
-            html += `</tbody></table>`;
-        }
-
-        return res.status(200).send(html);
-
-    } catch (err) {
-        console.error("ERROR:", err);
-        return res.status(500).send(`<h3>Error inesperado</h3><pre>${err.message}</pre>`);
+    getCurrentPrice() {
+        return this.priceCurrent;
     }
-});
 
-
-// Liquidaciones 4h
-app.get("/liquidaciones4hour", async (req, res) => {
-    try {
-        console.log(`Llamo a Coinalyze (4h): ${new Date().toISOString()}`);
-
-        const now = new Date();
-
-        const roundedHours = Math.floor(now.getHours() / 4) * 4;
-        now.setHours(roundedHours);
-        now.setMinutes(0);
-        now.setSeconds(0);
-        now.setMilliseconds(0);
-        now.setHours(now.getHours() - 4); // Resta un bloque completo de 4h
-
-        const to = Math.floor(now.getTime() / 1000); // timestamp final
-        const from = to - (500 * 4 * 60 * 60); // 500 bloques de 4 horas
-
-        const url = `https://api.coinalyze.net/v1/liquidation-history?api_key=84bd6d2d-4045-4b53-8b61-151c618d4311&symbols=BTCUSDT_PERP.A&interval=4hour&from=${from}&to=${to}&convert_to_usd=true`;
-
-        const response = await fetch(url);
-        const rawBody = await response.text();
-
-        if (!response.ok) {
-            console.error("Error Coinalyze:", response.status, rawBody);
-            return res.status(500).send(`<h3>Error al obtener datos de Coinalyze</h3><pre>${rawBody}</pre>`);
-        }
-
-        const data = JSON.parse(rawBody);
-        const liquidationMap = new Map();
-
-        if (Array.isArray(data)) {
-            data.forEach(item => {
-                if (Array.isArray(item.history)) {
-                    item.history.forEach(entry => {
-                        const timestamp = entry.t * 1000;
-                        liquidationMap.set(timestamp, {
-                            long: entry.l,
-                            short: entry.s
-                        });
-                    });
-                }
-            });
-        }
-
-        const processedLiquidations = [];
-        for (let t = from * 1000; t <= to * 1000; t += 4 * 60 * 60 * 1000) {
-            const date = new Date(t);
-            const entry = liquidationMap.get(t) || { long: 0, short: 0 };
-            processedLiquidations.push({
-                timestamp: t,
-                time: date.toISOString(),
-                timeShort: date.toLocaleString('es-ES', {
-                    dateStyle: 'short',
-                    timeStyle: 'medium'
-                }),
-                long: entry.long,
-                short: entry.short
-            });
-        }
-
-        const updatedTime = processedLiquidations.length > 0 ? processedLiquidations.at(-1).time : "Sin datos";
-
-        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-        res.setHeader("Pragma", "no-cache");
-        res.setHeader("Expires", "0");
-        res.setHeader("Surrogate-Control", "no-store");
-
-        if (req.query.download !== undefined) {
-            const jsonContent = processedLiquidations.map(l => ({
-                timestamp: l.timestamp,
-                long: l.long,
-                short: l.short
-            }));
-
-            res.setHeader("Content-Type", "application/json");
-            res.setHeader("Content-Disposition", "attachment; filename=liquidaciones4hour.json");
-            return res.json(jsonContent);
-        }
-
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-
-        const tableHeaders = ["fecha/hora (local)", "long", "short"];
-        let html = `<h2>Liquidaciones BTC - Últimos 500 bloques de 4h</h2>
-                    <p>Actualizado: ${updatedTime}</p>
-                    <p><a href="/liquidaciones4hour?download">Descargar JSON</a></p>`;
-
-        if (processedLiquidations.length === 0) {
-            html += `<p>No se encontraron datos.</p>`;
-        } else {
-            html += `<table border="1" style="border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px;">
-                        <thead style="background-color: #f2f2f2;">
-                           <tr>${tableHeaders.map(h => `<th>${h}</th>`).join('')}</tr>
-                        </thead>
-                        <tbody>`;
-            processedLiquidations.forEach(l => {
-                html += `<tr><td>${l.timeShort}</td><td>${l.long}</td><td>${l.short}</td></tr>`;
-            });
-            html += `</tbody></table>`;
-        }
-
-        return res.status(200).send(html);
-
-    } catch (err) {
-        console.error("ERROR:", err);
-        return res.status(500).send(`<h3>Error inesperado</h3><pre>${err.message}</pre>`);
+    getLast(arrayName, offset = 0) {
+        const idx = this.candleData[arrayName].length - 1 - offset;
+        return idx >= 0 ? this.candleData[arrayName][idx] : null;
     }
-});
 
-
-
-// Liquidaciones diarias (1d)
-app.get("/liquidacionesdaily", async (req, res) => {
-    try {
-        console.log(`Llamo a Coinalyze (1d): ${new Date().toISOString()}`);
-
-        const now = new Date();
-        now.setUTCHours(0, 0, 0, 0); // Ajustamos a medianoche UTC
-        now.setUTCDate(now.getUTCDate() - 1); // Retroceder un día completo
-
-        const to = Math.floor(now.getTime() / 1000);
-        const from = to - (500 * 24 * 60 * 60); // 500 días atrás
-
-        const url = `https://api.coinalyze.net/v1/liquidation-history?api_key=84bd6d2d-4045-4b53-8b61-151c618d4311&symbols=BTCUSDT_PERP.A&interval=daily&from=${from}&to=${to}&convert_to_usd=true`;
-
-        const response = await fetch(url);
-        const rawBody = await response.text();
-
-        if (!response.ok) {
-            console.error("Error Coinalyze:", response.status, rawBody);
-            return res.status(500).send(`<h3>Error al obtener datos de Coinalyze</h3><pre>${rawBody}</pre>`);
+    async changeTimeframe(timeframe) {
+        if (this.socket) {
+            this.socket.close();
         }
 
-        const data = JSON.parse(rawBody);
-        const liquidationMap = new Map();
+        this.currentTimeframe = timeframe;
+        
+        // Limpiar datos de liquidaciones antes de cargar los nuevos
+        this.clearLiquidationData();
+        
+        // Primero cargamos los datos históricos de velas
+        await this.loadHistoricalData();
+        
+        // Luego enviamos una actualización sin liquidaciones
+        this.sendUpdate();
+        
+        // Finalmente cargamos las liquidaciones
+        await this.loadLiquidationData();
+        
+        // Y enviamos otra actualización ya con las liquidaciones
+        this.sendUpdate();
+        
+        this.startLiveUpdates();
 
-        if (Array.isArray(data)) {
-            data.forEach(item => {
-                if (Array.isArray(item.history)) {
-                    item.history.forEach(entry => {
-                        const timestamp = entry.t * 1000;
-                        liquidationMap.set(timestamp, {
-                            long: entry.l,
-                            short: entry.s
-                        });
-                    });
-                }
-            });
-        }
-
-        const processedLiquidations = [];
-        for (let t = from * 1000; t <= to * 1000; t += 24 * 60 * 60 * 1000) {
-            const date = new Date(t);
-            const entry = liquidationMap.get(t) || { long: 0, short: 0 };
-            processedLiquidations.push({
-                timestamp: t,
-                time: date.toISOString(),
-                timeShort: date.toLocaleDateString('es-ES', {
-                    weekday: 'short',
-                    year: 'numeric',
-                    month: 'short',
-                    day: 'numeric'
-                }),
-                long: entry.long,
-                short: entry.short
-            });
-        }
-
-        const updatedTime = processedLiquidations.length > 0 ? processedLiquidations.at(-1).time : "Sin datos";
-
-        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-        res.setHeader("Pragma", "no-cache");
-        res.setHeader("Expires", "0");
-        res.setHeader("Surrogate-Control", "no-store");
-
-        if (req.query.download !== undefined) {
-            const jsonContent = processedLiquidations.map(l => ({
-                timestamp: l.timestamp,
-                long: l.long,
-                short: l.short
-            }));
-
-            res.setHeader("Content-Type", "application/json");
-            res.setHeader("Content-Disposition", "attachment; filename=liquidacionesdaily.json");
-            return res.json(jsonContent);
-        }
-
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-
-        const tableHeaders = ["fecha (local)", "long", "short"];
-        let html = `<h2>Liquidaciones BTC - Últimos 500 días</h2>
-                    <p>Actualizado: ${updatedTime}</p>
-                    <p><a href="/liquidacionesdaily?download">Descargar JSON</a></p>`;
-
-        if (processedLiquidations.length === 0) {
-            html += `<p>No se encontraron datos.</p>`;
-        } else {
-            html += `<table border="1" style="border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px;">
-                        <thead style="background-color: #f2f2f2;">
-                           <tr>${tableHeaders.map(h => `<th>${h}</th>`).join('')}</tr>
-                        </thead>
-                        <tbody>`;
-            processedLiquidations.forEach(l => {
-                html += `<tr><td>${l.timeShort}</td><td>${l.long}</td><td>${l.short}</td></tr>`;
-            });
-            html += `</tbody></table>`;
-        }
-
-        return res.status(200).send(html);
-
-    } catch (err) {
-        console.error("ERROR:", err);
-        return res.status(500).send(`<h3>Error inesperado</h3><pre>${err.message}</pre>`);
+        return this.candleData;
     }
-});
 
+    clearLiquidationData() {
+        // Limpiar todos los arrays de liquidaciones
+        for (const key in this.liquidationData) {
+            this.liquidationData[key] = [];
+        }
+    }
 
-module.exports = app;
+    sendUpdate() {
+        const dataToSend = { ...this.candleData, liquidationData: this.liquidationData };
+        if (this.onUpdateCallback) {
+            this.onUpdateCallback(dataToSend);
+        }
+    }
+
+    startLiveUpdates() {
+        if (this.socket) {
+            this.socket.close();
+        }
+
+        this.socket = new WebSocket(`wss://stream.binance.com:9443/ws/btcusdt@kline_${this.currentTimeframe}`);
+
+        this.socket.onmessage = async event => {
+            const message = JSON.parse(event.data);
+            const kline = message.k;
+            const newTime = kline.t / 1000;
+            const price = parseFloat(kline.c);
+
+            this.priceCurrent = price;
+
+            const lastTime = this.getLast('time');
+
+            if (lastTime && newTime === lastTime) {
+                const lastIndex = this.candleData.time.length - 1;
+                this.candleData.high[lastIndex] = Math.max(this.candleData.high[lastIndex], parseFloat(kline.h));
+                this.candleData.low[lastIndex] = Math.min(this.candleData.low[lastIndex], parseFloat(kline.l));
+                this.candleData.close[lastIndex] = parseFloat(kline.c);
+                this.candleData.volume[lastIndex] = parseFloat(kline.v);
+            } else {
+                // Nueva vela: agregar y actualizar liquidaciones
+                this.candleData.time.push(newTime);
+                this.candleData.open.push(parseFloat(kline.o));
+                this.candleData.high.push(parseFloat(kline.h));
+                this.candleData.low.push(parseFloat(kline.l));
+                this.candleData.close.push(parseFloat(kline.c));
+                this.candleData.volume.push(parseFloat(kline.v));
+
+                if (this.candleData.time.length > 1000) {
+                    for (const key in this.candleData) {
+                        this.candleData[key].shift();
+                    }
+                }
+            }
+
+            this.sendUpdate();
+        };
+    }
+
+    async loadHistoricalData() {
+        try {
+            const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${this.currentTimeframe}&limit=500`);
+            const data = await res.json();
+
+            for (const key in this.candleData) {
+                this.candleData[key] = [];
+            }
+
+            data.forEach(candle => {
+                this.candleData.time.push(candle[0] / 1000);
+                this.candleData.open.push(parseFloat(candle[1]));
+                this.candleData.high.push(parseFloat(candle[2]));
+                this.candleData.low.push(parseFloat(candle[3]));
+                this.candleData.close.push(parseFloat(candle[4]));
+                this.candleData.volume.push(parseFloat(candle[5]));
+            });
+
+            if (data.length > 0) {
+                this.priceCurrent = this.candleData.close[this.candleData.close.length - 1];
+            }
+
+            console.log(`✅ Cargadas ${data.length} velas para temporalidad ${this.currentTimeframe}`);
+            return this.candleData;
+        } catch (error) {
+            console.error("Error obteniendo datos históricos:", error);
+            return this.candleData;
+        }
+    }
+
+    async loadLiquidationData() {
+        try {
+            this.isLoadingLiquidations = true;
+            
+            // Seleccionar la URL correcta según la temporalidad
+            let liquidationUrl;
+            let timeframeLabel;
+            
+            switch(this.currentTimeframe) {
+                case '1m':
+                    liquidationUrl = 'https://liquidacionesjs.vercel.app/liquidaciones1min?download';
+                    timeframeLabel = '1m';
+                    break;
+                case '5m':
+                    liquidationUrl = 'https://liquidacionesjs.vercel.app/liquidaciones5min?download';
+                    timeframeLabel = '5m';
+                    break;
+                case '15m':
+                    liquidationUrl = 'https://liquidacionesjs.vercel.app/liquidaciones15min?download';
+                    timeframeLabel = '15m';
+                    break;
+                case '1h':
+                    liquidationUrl = 'https://liquidacionesjs.vercel.app/liquidaciones1hour?download';
+                    timeframeLabel = '1h';
+                    break;
+                case '4h':
+                    liquidationUrl = 'https://liquidacionesjs.vercel.app/liquidaciones4hour?download';
+                    timeframeLabel = '4h';
+                    break;
+                case '1d':
+                    liquidationUrl = 'https://liquidacionesjs.vercel.app/liquidacionesdaily?download';
+                    timeframeLabel = '1d';
+                    break;
+                default:
+                    // Para cualquier otra temporalidad usamos los datos de 5 minutos como fallback
+                    liquidationUrl = 'https://liquidacionesjs.vercel.app/liquidaciones5min?download';
+                    timeframeLabel = '5m (default)';
+            }
+            
+            const res = await fetch(liquidationUrl);
+            let data = await res.json();
+
+            // Limpiar los datos de liquidaciones antes de cargar los nuevos
+            this.clearLiquidationData();
+
+            if (!Array.isArray(data)) {
+                if (typeof data === 'string') {
+                    data = JSON.parse('[' + data + ']');
+                } else {
+                    console.error("Formato de datos de liquidaciones inesperado");
+                    this.isLoadingLiquidations = false;
+                    return this.liquidationData;
+                }
+            }
+
+            data.forEach(item => {
+                this.liquidationData.time.push(item.timestamp / 1000);
+                this.liquidationData.long.push(parseFloat(item.long) || 0);
+                this.liquidationData.short.push(parseFloat(item.short) || 0);
+            });
+
+            if (this.liquidationData.time.length > 1000) {
+                const excessEntries = this.liquidationData.time.length - 1000;
+                for (const key in this.liquidationData) {
+                    this.liquidationData[key] = this.liquidationData[key].slice(excessEntries);
+                }
+            }
+
+            console.log(`✅ Cargadas ${data.length} liquidaciones (datos de ${timeframeLabel})`);
+            this.isLoadingLiquidations = false;
+            return this.liquidationData;
+        } catch (error) {
+            console.error("Error obteniendo datos de liquidaciones:", error);
+            this.isLoadingLiquidations = false;
+            return this.liquidationData;
+        }
+    }
+}
+
+// Exportar la clase
+window.BinanceAPI = BinanceAPI;
