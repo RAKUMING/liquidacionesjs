@@ -58,7 +58,7 @@ app.get("/liquidaciones", async (req, res) => {
         const processedLiquidations = [];
         for (let t = from * 1000; t <= to * 1000; t += 5 * 60 * 1000) {
             const date = new Date(t);
-            const entry = liquidationMap.get(t) || { long: 0.0001, short: 0.0001 }; // Valor por defecto
+            const entry = liquidationMap.get(t) || { long: 0, short: 0}; // Valor por defecto
 
             processedLiquidations.push({
                 timestamp: t,
