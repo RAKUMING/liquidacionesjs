@@ -217,7 +217,7 @@ app.get("/liquidaciones5min", async (req, res) => {
         now.setMinutes(now.getMinutes() - 5);
 
         const to = Math.floor(now.getTime() / 1000);
-        const from = to - (500 * 5 * 60);
+        const from = to - (999 * 5 * 60);
 
         const url = `https://api.coinalyze.net/v1/liquidation-history?api_key=84bd6d2d-4045-4b53-8b61-151c618d4311&symbols=BTCUSDT_PERP.A&interval=5min&from=${from}&to=${to}&convert_to_usd=true`;
 
@@ -279,7 +279,7 @@ app.get("/liquidaciones1min", async (req, res) => {
         now.setMinutes(now.getMinutes() - 1);
 
         const to = Math.floor(now.getTime() / 1000);
-        const from = to - (500 * 60);
+        const from = to - (999 * 60);
 
         const url = `https://api.coinalyze.net/v1/liquidation-history?api_key=84bd6d2d-4045-4b53-8b61-151c618d4311&symbols=BTCUSDT_PERP.A&interval=1min&from=${from}&to=${to}&convert_to_usd=true`;
 
@@ -434,7 +434,7 @@ app.get("/liquidaciones15min", async (req, res) => {
         now.setMinutes(now.getMinutes() - 15);
 
         const to = Math.floor(now.getTime() / 1000);
-        const from = to - (500 * 15 * 60);
+        const from = to - (999 * 15 * 60);
 
         const url = `https://api.coinalyze.net/v1/liquidation-history?api_key=84bd6d2d-4045-4b53-8b61-151c618d4311&symbols=BTCUSDT_PERP.A&interval=15min&from=${from}&to=${to}&convert_to_usd=true`;
 
@@ -542,7 +542,7 @@ app.get("/liquidaciones1hour", async (req, res) => {
         now.setHours(roundedHours - 1); // Resta 1 hora completa
 
         const to = Math.floor(now.getTime() / 1000); // timestamp final
-        const from = to - (500 * 60 * 60); // 500 bloques de 1 hora
+        const from = to - (999 * 60 * 60); // 500 bloques de 1 hora
 
         const url = `https://api.coinalyze.net/v1/liquidation-history?api_key=84bd6d2d-4045-4b53-8b61-151c618d4311&symbols=BTCUSDT_PERP.A&interval=1hour&from=${from}&to=${to}&convert_to_usd=true`;
 
@@ -651,7 +651,7 @@ app.get("/liquidaciones4hour", async (req, res) => {
         now.setHours(now.getHours() - 4); // Resta un bloque completo de 4h
 
         const to = Math.floor(now.getTime() / 1000); // timestamp final
-        const from = to - (500 * 4 * 60 * 60); // 500 bloques de 4 horas
+        const from = to - (999 * 4 * 60 * 60); // 500 bloques de 4 horas
 
         const url = `https://api.coinalyze.net/v1/liquidation-history?api_key=84bd6d2d-4045-4b53-8b61-151c618d4311&symbols=BTCUSDT_PERP.A&interval=4hour&from=${from}&to=${to}&convert_to_usd=true`;
 
@@ -756,7 +756,7 @@ app.get("/liquidacionesdaily", async (req, res) => {
         now.setUTCDate(now.getUTCDate() - 1); // Retroceder un día completo
 
         const to = Math.floor(now.getTime() / 1000);
-        const from = to - (500 * 24 * 60 * 60); // 500 días atrás
+        const from = to - (999 * 24 * 60 * 60); // 500 días atrás
 
         const url = `https://api.coinalyze.net/v1/liquidation-history?api_key=84bd6d2d-4045-4b53-8b61-151c618d4311&symbols=BTCUSDT_PERP.A&interval=daily&from=${from}&to=${to}&convert_to_usd=true`;
 
